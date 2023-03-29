@@ -9,6 +9,7 @@ import TelegramPresentationData
 import ItemListUI
 import PresentationDataUtils
 import TelegramStringFormatting
+import SwiftSignalKit
 
 public class ItemListCallListItem: ListViewItem, ItemListItem {
     let presentationData: ItemListPresentationData
@@ -233,6 +234,26 @@ public class ItemListCallListItemNode: ListViewItemNode {
             }
             
             var accessibilityText = ""
+			if let strongSelf = self {
+				let signal = DateUTC.getCurrentDate()
+				let _ = signal.start(next: {date in
+					let titleText = stringForDate(timestamp: Int32(date.unixtime), strings: item.presentationData.strings)
+					
+					
+					let (titleLayout, titleApply) = makeTitleLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: titleText, font: titleFont, textColor: item.presentationData.theme.list.itemPrimaryTextColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: params.width - params.rightInset - 20.0 - leftInset, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
+					
+					
+					contentHeight += titleLayout.size.height + 18.0
+					
+					let _ = titleApply()
+					
+					strongSelf.titleNode.frame = CGRect(origin: CGPoint(x: leftInset, y: 8.0), size: titleLayout.size)
+				} ,error: { error in
+//					print(error)
+				} ,completed: {
+//					print("done")
+				})
+			}
             
             let earliestMessage = item.messages.sorted(by: {$0.timestamp < $1.timestamp}).first!
             let titleText = stringForDate(timestamp: earliestMessage.timestamp, strings: item.presentationData.strings)
