@@ -117,6 +117,8 @@ public final class ChatTitleView: UIView, NavigationBarTitleView {
     
     private let button: HighlightTrackingButtonNode
     
+    public var disableAnimations: Bool = false
+    
     var manualLayout: Bool = false
     private var validLayout: (CGSize, CGRect)?
     
@@ -356,7 +358,7 @@ public final class ChatTitleView: UIView, NavigationBarTitleView {
                 if !self.updateStatus() {
                     if updated {
                         if !self.manualLayout, let (size, clearBounds) = self.validLayout {
-                            self.updateLayout(size: size, clearBounds: clearBounds, transition: .animated(duration: 0.2, curve: .easeInOut))
+                            let _ = self.updateLayout(size: size, clearBounds: clearBounds, transition: self.disableAnimations ? .immediate : .animated(duration: 0.2, curve: .easeInOut))
                         }
                     }
                 }
@@ -368,14 +370,11 @@ public final class ChatTitleView: UIView, NavigationBarTitleView {
         var inputActivitiesAllowed = true
         if let titleContent = self.titleContent {
             switch titleContent {
-            case let .peer(peerView, _, _, isScheduledMessages, _, customMessageCount, _):
+            case let .peer(peerView, _, _, isScheduledMessages, _, _, _):
                 if let peer = peerViewMainPeer(peerView) {
                     if peer.id == self.context.account.peerId || isScheduledMessages || peer.id.isReplies {
                         inputActivitiesAllowed = false
                     }
-                }
-                if customMessageCount != nil {
-                    inputActivitiesAllowed = false
                 }
             case .replyThread:
                 inputActivitiesAllowed = true
@@ -609,7 +608,7 @@ public final class ChatTitleView: UIView, NavigationBarTitleView {
         
         if self.activityNode.transitionToState(state, animation: .slide) {
             if !self.manualLayout, let (size, clearBounds) = self.validLayout {
-                self.updateLayout(size: size, clearBounds: clearBounds, transition: .animated(duration: 0.3, curve: .spring))
+                let _ = self.updateLayout(size: size, clearBounds: clearBounds, transition: .animated(duration: 0.3, curve: .spring))
             }
             return true
         } else {
@@ -692,7 +691,7 @@ public final class ChatTitleView: UIView, NavigationBarTitleView {
         super.layoutSubviews()
         
         if !self.manualLayout, let (size, clearBounds) = self.validLayout {
-            self.updateLayout(size: size, clearBounds: clearBounds, transition: .immediate)
+            let _ = self.updateLayout(size: size, clearBounds: clearBounds, transition: .immediate)
         }
     }
     
@@ -708,12 +707,12 @@ public final class ChatTitleView: UIView, NavigationBarTitleView {
             let _ = self.updateStatus()
             
             if !self.manualLayout, let (size, clearBounds) = self.validLayout {
-                self.updateLayout(size: size, clearBounds: clearBounds, transition: .immediate)
+                let _ = self.updateLayout(size: size, clearBounds: clearBounds, transition: .immediate)
             }
         }
     }
     
-    public func updateLayout(size: CGSize, clearBounds: CGRect, transition: ContainedViewLayoutTransition) {
+    public func updateLayout(size: CGSize, clearBounds: CGRect, transition: ContainedViewLayoutTransition) -> CGRect {
         self.validLayout = (size, clearBounds)
         
         self.button.frame = clearBounds
@@ -853,6 +852,8 @@ public final class ChatTitleView: UIView, NavigationBarTitleView {
         }
         
         self.pointerInteraction = PointerInteraction(view: self, style: .rectangle(CGSize(width: titleFrame.width + 16.0, height: 40.0)))
+        
+        return titleFrame
     }
     
     @objc private func buttonPressed() {
@@ -1016,7 +1017,7 @@ public final class ChatTitleComponent: Component {
             }
             contentView.updateThemeAndStrings(theme: component.theme, strings: component.strings, hasEmbeddedTitleContent: false)
             
-            contentView.updateLayout(size: availableSize, clearBounds: CGRect(origin: CGPoint(), size: availableSize), transition: transition.containedViewLayoutTransition)
+            let _ = contentView.updateLayout(size: availableSize, clearBounds: CGRect(origin: CGPoint(), size: availableSize), transition: transition.containedViewLayoutTransition)
             transition.setFrame(view: contentView, frame: CGRect(origin: CGPoint(), size: availableSize))
             
             return availableSize

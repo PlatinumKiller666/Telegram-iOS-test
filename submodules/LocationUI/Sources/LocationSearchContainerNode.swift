@@ -3,7 +3,6 @@ import UIKit
 import AsyncDisplayKit
 import Display
 import SwiftSignalKit
-import Postbox
 import TelegramCore
 import TelegramPresentationData
 import TelegramStringFormatting
@@ -156,7 +155,7 @@ final class LocationSearchContainerNode: ASDisplayNode {
         let searchItems = self.searchQuery.get()
         |> mapToSignal { query -> Signal<String?, NoError> in
             if let query = query, !query.isEmpty {
-                return (.complete() |> delay(0.6, queue: Queue.mainQueue()))
+                return (.complete() |> delay(1.0, queue: Queue.mainQueue()))
                 |> then(.single(query))
             } else {
                 return .single(query)

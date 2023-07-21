@@ -107,7 +107,7 @@ class Download: NSObject, MTRequestMessageServiceDelegate {
         let saveFilePart: (FunctionDescription, Buffer, DeserializeFunctionResponse<Api.Bool>)
         if asBigPart {
             let totalParts: Int32
-            if let bigTotalParts = bigTotalParts {
+            if let bigTotalParts = bigTotalParts, bigTotalParts > 0 && bigTotalParts < Int32.max {
                 totalParts = Int32(bigTotalParts)
             } else {
                 totalParts = -1
@@ -117,7 +117,7 @@ class Download: NSObject, MTRequestMessageServiceDelegate {
             saveFilePart = Api.functions.upload.saveFilePart(fileId: fileId, filePart: Int32(index), bytes: Buffer(data: data))
         }
         
-        return multiplexedManager.request(to: .main(datacenterId), consumerId: consumerId, data: wrapMethodBody(saveFilePart, useCompression: useCompression), tag: tag, continueInBackground: true)
+        return multiplexedManager.request(to: .main(datacenterId), consumerId: consumerId, resourceId: nil, data: wrapMethodBody(saveFilePart, useCompression: useCompression), tag: tag, continueInBackground: true)
         |> mapError { error -> UploadPartError in
             if error.errorCode == 400 {
                 return .invalidMedia
@@ -362,16 +362,16 @@ class Download: NSObject, MTRequestMessageServiceDelegate {
                 return true
             }
             
-            request.completed = { (boxedResponse, timestamp, error) -> () in
+            request.completed = { (boxedResponse, info, error) -> () in
                 if let error = error {
-                    subscriber.putError((error, timestamp))
+                    subscriber.putError((error, info?.timestamp ?? 0.0))
                 } else {
                     if let result = (boxedResponse as! BoxedMessage).body as? T {
-                        subscriber.putNext((result, timestamp))
+                        subscriber.putNext((result, info?.timestamp ?? 0.0))
                         subscriber.putCompletion()
                     }
                     else {
-                        subscriber.putError((MTRpcError(errorCode: 500, errorDescription: "TL_VERIFICATION_ERROR"), timestamp))
+                        subscriber.putError((MTRpcError(errorCode: 500, errorDescription: "TL_VERIFICATION_ERROR"), info?.timestamp ?? 0.0))
                     }
                 }
             }
@@ -386,7 +386,7 @@ class Download: NSObject, MTRequestMessageServiceDelegate {
         }
     }
     
-    func rawRequest(_ data: (FunctionDescription, Buffer, (Buffer) -> Any?), automaticFloodWait: Bool = true, failOnServerErrors: Bool = false, logPrefix: String = "") -> Signal<(Any, Double), (MTRpcError, Double)> {
+    func rawRequest(_ data: (FunctionDescription, Buffer, (Buffer) -> Any?), automaticFloodWait: Bool = true, failOnServerErrors: Bool = false, logPrefix: String = "") -> Signal<(Any, NetworkResponseInfo), (MTRpcError, Double)> {
         let requestService = self.requestService
         return Signal { subscriber in
             let request = MTRequest()
@@ -414,11 +414,16 @@ class Download: NSObject, MTRequestMessageServiceDelegate {
                 return true
             }
             
-            request.completed = { (boxedResponse, timestamp, error) -> () in
+            request.completed = { (boxedResponse, info, error) -> () in
                 if let error = error {
-                    subscriber.putError((error, timestamp))
+                    subscriber.putError((error, info?.timestamp ?? 0))
                 } else {
-                    subscriber.putNext(((boxedResponse as! BoxedMessage).body, timestamp))
+                    let mappedInfo = NetworkResponseInfo(
+                        timestamp: info?.timestamp ?? 0.0,
+                        networkType: info?.networkType == 0 ? .wifi : .cellular,
+                        networkDuration: info?.duration ?? 0.0
+                    )
+                    subscriber.putNext(((boxedResponse as! BoxedMessage).body, mappedInfo))
                     subscriber.putCompletion()
                 }
             }

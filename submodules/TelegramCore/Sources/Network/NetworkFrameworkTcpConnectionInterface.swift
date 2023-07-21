@@ -122,7 +122,7 @@ final class NetworkFrameworkTcpConnectionInterface: NSObject, MTTcpConnectionInt
                 }
             }
             
-            connection.betterPathUpdateHandler = { [weak self] hasBetterPath in
+            /*connection.betterPathUpdateHandler = { [weak self] hasBetterPath in
                 queue.async {
                     guard let self = self else {
                         return
@@ -131,7 +131,7 @@ final class NetworkFrameworkTcpConnectionInterface: NSObject, MTTcpConnectionInt
                         self.cancelWithError(error: nil)
                     }
                 }
-            }
+            }*/
             
             self.connectTimeoutTimer = SwiftSignalKit.Timer(timeout: timeout, repeat: false, completion: { [weak self] in
                 guard let self = self else {
@@ -178,7 +178,7 @@ final class NetworkFrameworkTcpConnectionInterface: NSObject, MTTcpConnectionInt
         
         func write(data: Data) {
             guard let connection = self.connection else {
-                assertionFailure("Connection not ready")
+                Logger.shared.log("NetworkFrameworkTcpConnectionInterface", "write called while connection == nil")
                 return
             }
             
@@ -222,9 +222,10 @@ final class NetworkFrameworkTcpConnectionInterface: NSObject, MTTcpConnectionInt
                 self.currentReadRequest = nil
                 
                 weak var delegate = self.delegate
+                let currentInterfaceIsWifi = self.currentInterfaceIsWifi
                 self.delegateQueue.async {
                     if let delegate = delegate {
-                        delegate.connectionInterfaceDidRead(currentReadRequest.data, withTag: currentReadRequest.request.tag)
+                        delegate.connectionInterfaceDidRead(currentReadRequest.data, withTag: currentReadRequest.request.tag, networkType: currentInterfaceIsWifi ? 0 : 1)
                     }
                 }
                 
@@ -239,7 +240,7 @@ final class NetworkFrameworkTcpConnectionInterface: NSObject, MTTcpConnectionInt
                         
                         if data.count != 0 && data.count <= currentReadRequest.request.length - currentReadRequest.readyLength {
                             currentReadRequest.data.withUnsafeMutableBytes { currentBuffer in
-                                guard let currentBytes = currentBuffer.assumingMemoryBound(to: UInt8.self).baseAddress else {
+                                guard let currentBytes = currentBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
                                     return
                                 }
                                 data.copyBytes(to: currentBytes.advanced(by: currentReadRequest.readyLength), count: data.count)

@@ -363,22 +363,25 @@ private final class CallSessionManagerContext {
     private let queue: Queue
     private let postbox: Postbox
     private let network: Network
+    private let accountPeerId: PeerId
     private let maxLayer: Int32
     private var versions: [CallSessionManagerImplementationVersion]
     private let addUpdates: (Api.Updates) -> Void
     
     private let ringingSubscribers = Bag<([CallSessionRingingState]) -> Void>()
     private var contexts: [CallSessionInternalId: CallSessionContext] = [:]
+    private var futureContextSubscribers: [CallSessionInternalId: Bag<(CallSession) -> Void>] = [:]
     private var contextIdByStableId: [CallSessionStableId: CallSessionInternalId] = [:]
 
     private var enqueuedSignalingData: [Int64: [Data]] = [:]
     
     private let disposables = DisposableSet()
     
-    init(queue: Queue, postbox: Postbox, network: Network, maxLayer: Int32, versions: [CallSessionManagerImplementationVersion], addUpdates: @escaping (Api.Updates) -> Void) {
+    init(queue: Queue, postbox: Postbox, network: Network, accountPeerId: PeerId, maxLayer: Int32, versions: [CallSessionManagerImplementationVersion], addUpdates: @escaping (Api.Updates) -> Void) {
         self.queue = queue
         self.postbox = postbox
         self.network = network
+        self.accountPeerId = accountPeerId
         self.maxLayer = maxLayer
         self.versions = versions.reversed()
         self.addUpdates = addUpdates
@@ -443,7 +446,10 @@ private final class CallSessionManagerContext {
         return Signal { [weak self] subscriber in
             let disposable = MetaDisposable()
             queue.async {
-                if let strongSelf = self, let context = strongSelf.contexts[internalId] {
+                guard let strongSelf = self else {
+                    return
+                }
+                if let context = strongSelf.contexts[internalId] {
                     let index = context.subscribers.add { next in
                         subscriber.putNext(next)
                     }
@@ -459,8 +465,22 @@ private final class CallSessionManagerContext {
                         }
                     })
                 } else {
-                    subscriber.putNext(CallSession(id: internalId, stableId: nil, isOutgoing: false, type: .audio, state: .terminated(id: nil, reason: .error(.generic), options: []), isVideoPossible: true))
-                    subscriber.putCompletion()
+                    if strongSelf.futureContextSubscribers[internalId] == nil {
+                        strongSelf.futureContextSubscribers[internalId] = Bag()
+                    }
+                    let index = strongSelf.futureContextSubscribers[internalId]?.add({ session in
+                        subscriber.putNext(session)
+                    })
+                    if let index = index {
+                        disposable.set(ActionDisposable {
+                            queue.async {
+                                guard let strongSelf = self else {
+                                    return
+                                }
+                                strongSelf.futureContextSubscribers[internalId]?.remove(index)
+                            }
+                        })
+                    }
                 }
             }
             return disposable
@@ -516,6 +536,11 @@ private final class CallSessionManagerContext {
             let session = CallSession(id: internalId, stableId: context.state.stableId, isOutgoing: context.isOutgoing, type: context.type, state: CallSessionState(context), isVideoPossible: context.isVideoPossible)
             for subscriber in context.subscribers.copyItems() {
                 subscriber(session)
+            }
+            if let futureSubscribers = self.futureContextSubscribers[internalId] {
+                for subscriber in futureSubscribers.copyItems() {
+                    subscriber(session)
+                }
             }
         }
     }
@@ -683,7 +708,7 @@ private final class CallSessionManagerContext {
             switch context.state {
                 case let .ringing(id, accessHash, gAHash, b, _):
                     let acceptVersions = self.versions.map({ $0.version })
-                    context.state = .accepting(id: id, accessHash: accessHash, gAHash: gAHash, b: b, disposable: (acceptCallSession(postbox: self.postbox, network: self.network, stableId: id, accessHash: accessHash, b: b, maxLayer: self.maxLayer, versions: acceptVersions) |> deliverOn(self.queue)).start(next: { [weak self] result in
+                    context.state = .accepting(id: id, accessHash: accessHash, gAHash: gAHash, b: b, disposable: (acceptCallSession(accountPeerId: self.accountPeerId, postbox: self.postbox, network: self.network, stableId: id, accessHash: accessHash, b: b, maxLayer: self.maxLayer, versions: acceptVersions) |> deliverOn(self.queue)).start(next: { [weak self] result in
                         if let strongSelf = self, let context = strongSelf.contexts[internalId] {
                             if case .accepting = context.state {
                                 switch result {
@@ -1033,9 +1058,9 @@ public final class CallSessionManager {
     private let queue = Queue()
     private var contextRef: Unmanaged<CallSessionManagerContext>?
     
-    init(postbox: Postbox, network: Network, maxLayer: Int32, versions: [CallSessionManagerImplementationVersion], addUpdates: @escaping (Api.Updates) -> Void) {
+    init(postbox: Postbox, network: Network, accountPeerId: PeerId, maxLayer: Int32, versions: [CallSessionManagerImplementationVersion], addUpdates: @escaping (Api.Updates) -> Void) {
         self.queue.async {
-            let context = CallSessionManagerContext(queue: self.queue, postbox: postbox, network: network, maxLayer: maxLayer, versions: versions, addUpdates: addUpdates)
+            let context = CallSessionManagerContext(queue: self.queue, postbox: postbox, network: network, accountPeerId: accountPeerId, maxLayer: maxLayer, versions: versions, addUpdates: addUpdates)
             self.contextRef = Unmanaged.passRetained(context)
         }
     }
@@ -1170,7 +1195,7 @@ private enum AcceptCallResult {
     case success(AcceptedCall)
 }
 
-private func acceptCallSession(postbox: Postbox, network: Network, stableId: CallSessionStableId, accessHash: Int64, b: Data, maxLayer: Int32, versions: [String]) -> Signal<AcceptCallResult, NoError> {
+private func acceptCallSession(accountPeerId: PeerId, postbox: Postbox, network: Network, stableId: CallSessionStableId, accessHash: Int64, b: Data, maxLayer: Int32, versions: [String]) -> Signal<AcceptCallResult, NoError> {
     return validatedEncryptionConfig(postbox: postbox, network: network)
     |> mapToSignal { config -> Signal<AcceptCallResult, NoError> in
         var gValue: Int32 = config.g.byteSwapped
@@ -1195,13 +1220,7 @@ private func acceptCallSession(postbox: Postbox, network: Network, stableId: Cal
                 return postbox.transaction { transaction -> AcceptCallResult in
                     switch call {
                     case let .phoneCall(phoneCall, users):
-                        var parsedUsers: [Peer] = []
-                        for user in users {
-                            parsedUsers.append(TelegramUser(user: user))
-                        }
-                        updatePeers(transaction: transaction, peers: parsedUsers, update: { _, updated in
-                            return updated
-                        })
+                        updatePeers(transaction: transaction, accountPeerId: accountPeerId, peers: AccumulatedPeers(users: users))
                         
                         switch phoneCall {
                         case .phoneCallEmpty, .phoneCallRequested, .phoneCallAccepted, .phoneCallDiscarded:

@@ -792,6 +792,18 @@ open class NavigationController: UINavigationController, ContainableController, 
                 } else {
                     modalContainer.keyboardViewManager = nil
                     modalContainer.canHaveKeyboardFocus = false
+                    
+                    if modalContainer.isFlat {
+                        let controllerStatusBarStyle = modalContainer.container.statusBarStyle
+                        switch controllerStatusBarStyle {
+                        case .Black, .White, .Hide:
+                            if topVisibleModalContainerWithStatusBar == nil {
+                                topVisibleModalContainerWithStatusBar = modalContainer
+                            }
+                        case .Ignore:
+                            break
+                        }
+                    }
                 }
                 previousModalContainer = modalContainer
                 if isStandaloneModal {
@@ -826,6 +838,9 @@ open class NavigationController: UINavigationController, ContainableController, 
                     let flatContainer = NavigationContainer(isFlat: self.isFlat, controllerRemoved: { [weak self] controller in
                         self?.controllerRemoved(controller)
                     })
+                    flatContainer.requestFilterController = { [weak self] controller in
+                        self?.filterController(controller, animated: true)
+                    }
                     flatContainer.statusBarStyleUpdated = { [weak self] transition in
                         guard let strongSelf = self else {
                             return
@@ -853,6 +868,9 @@ open class NavigationController: UINavigationController, ContainableController, 
                 let flatContainer = NavigationContainer(isFlat: self.isFlat, controllerRemoved: { [weak self] controller in
                     self?.controllerRemoved(controller)
                 })
+                flatContainer.requestFilterController = { [weak self] controller in
+                    self?.filterController(controller, animated: true)
+                }
                 flatContainer.statusBarStyleUpdated = { [weak self] transition in
                     guard let strongSelf = self else {
                         return
@@ -1254,9 +1272,6 @@ open class NavigationController: UINavigationController, ContainableController, 
     
     private func controllerRemoved(_ controller: ViewController) {
         self.filterController(controller, animated: false)
-    }
-    
-    public func updateModalTransition(_ value: CGFloat, transition: ContainedViewLayoutTransition) {
     }
     
     private func scrollToTop(_ subject: NavigationSplitContainerScrollToTop) {
@@ -1746,5 +1761,12 @@ open class NavigationController: UINavigationController, ContainableController, 
     
     private func notifyAccessibilityScreenChanged() {
         UIAccessibility.post(notification: UIAccessibility.Notification.screenChanged, argument: nil)
+    }
+    
+    public func updateRootContainerTransitionOffset(_ offset: CGFloat, transition: ContainedViewLayoutTransition) {
+        guard let rootContainer = self.rootContainer, case let .flat(container) = rootContainer else {
+            return
+        }
+        transition.updateTransform(node: container, transform: CGAffineTransformMakeTranslation(offset, 0.0))
     }
 }

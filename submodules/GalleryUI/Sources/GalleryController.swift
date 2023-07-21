@@ -303,7 +303,7 @@ public func galleryItemForEntry(
                         if let file = webpageContent.file, file.isVideo {
                             content = NativeVideoContent(id: .message(message.stableId, file.fileId), userLocation: .peer(message.id.peerId), fileReference: .message(message: MessageReference(message), media: file), imageReference: mediaImage.flatMap({ ImageMediaReference.message(message: MessageReference(message), media: $0) }), streamVideo: .conservative, loopVideo: loopVideos, tempFilePath: tempFilePath, captureProtected: message.isCopyProtected(), storeAfterDownload: generateStoreAfterDownload?(message, file))
                         } else if URL(string: embedUrl)?.pathExtension == "mp4" {
-                            content = SystemVideoContent(userLocation: .peer(message.id.peerId), url: embedUrl, imageReference: .webPage(webPage: WebpageReference(webpage), media: image), dimensions: webpageContent.embedSize?.cgSize ?? CGSize(width: 640.0, height: 640.0), duration: Int32(webpageContent.duration ?? 0))
+                            content = SystemVideoContent(userLocation: .peer(message.id.peerId), url: embedUrl, imageReference: .webPage(webPage: WebpageReference(webpage), media: image), dimensions: webpageContent.embedSize?.cgSize ?? CGSize(width: 640.0, height: 640.0), duration: webpageContent.duration.flatMap(Double.init) ?? 0.0)
                         }
                     }
                     if content == nil, let webEmbedContent = WebEmbedVideoContent(userLocation: .peer(message.id.peerId), webPage: webpage, webpageContent: webpageContent, forcedTimestamp: timecode.flatMap(Int.init), openUrl: { url in
@@ -1153,6 +1153,7 @@ public class GalleryController: ViewController, StandalonePresentableController,
         
         let completion = { [weak self] in
             if animatedOutNode && animatedOutInterface {
+                self?.actionInteraction?.updateCanReadHistory(true)
                 self?._hiddenMedia.set(.single(nil))
                 self?.presentingViewController?.dismiss(animated: false, completion: nil)
             }
@@ -1210,7 +1211,9 @@ public class GalleryController: ViewController, StandalonePresentableController,
                 })
             }
         })
-        self.displayNode = GalleryControllerNode(controllerInteraction: controllerInteraction)
+        
+        let disableTapNavigation = !(self.context.sharedContext.currentMediaDisplaySettings.with { $0 }.showNextMediaOnTap)
+        self.displayNode = GalleryControllerNode(controllerInteraction: controllerInteraction, disableTapNavigation: disableTapNavigation)
         self.displayNodeDidLoad()
         
         self.galleryNode.statusBar = self.statusBar
@@ -1228,12 +1231,14 @@ public class GalleryController: ViewController, StandalonePresentableController,
             return nil
         }
         self.galleryNode.dismiss = { [weak self] in
+            self?.actionInteraction?.updateCanReadHistory(true)
             self?._hiddenMedia.set(.single(nil))
             self?.presentingViewController?.dismiss(animated: false, completion: nil)
         }
         
         self.galleryNode.beginCustomDismiss = { [weak self] simpleAnimation in
             if let strongSelf = self {
+                strongSelf.actionInteraction?.updateCanReadHistory(true)
                 strongSelf._hiddenMedia.set(.single(nil))
                 
                 let animatedOutNode = !simpleAnimation
@@ -1513,6 +1518,8 @@ public class GalleryController: ViewController, StandalonePresentableController,
         }
         
         self.accountInUseDisposable.set(self.context.sharedContext.setAccountUserInterfaceInUse(self.context.account.id))
+        
+        self.actionInteraction?.updateCanReadHistory(false)
     }
     
     override public func didAppearInContextPreview() {

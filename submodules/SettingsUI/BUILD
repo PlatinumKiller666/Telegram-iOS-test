@@ -110,6 +110,10 @@ swift_library(
         "//submodules/AnimatedAvatarSetNode",
         "//submodules/TelegramUI/Components/StorageUsageScreen",
         "//submodules/FeaturedStickersScreen:FeaturedStickersScreen",
+        "//submodules/MediaPickerUI:MediaPickerUI",
+        "//submodules/ImageBlur:ImageBlur",
+        "//submodules/AttachmentUI:AttachmentUI",
+        "//submodules/TelegramUI/Components/PeerInfo/PeerInfoStoryGridScreen",
     ],
     visibility = [
         "//visibility:public",

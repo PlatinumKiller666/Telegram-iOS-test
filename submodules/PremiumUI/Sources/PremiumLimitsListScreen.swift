@@ -2,8 +2,8 @@ import Foundation
 import UIKit
 import Display
 import AsyncDisplayKit
-import Postbox
 import TelegramCore
+import Postbox
 import SwiftSignalKit
 import AccountContext
 import TelegramPresentationData
@@ -170,6 +170,7 @@ private final class LimitComponent: CombinedComponent {
                     badgeIconName: "",
                     badgeText: nil,
                     badgePosition: 0.0,
+                    badgeGraphPosition: 0.0,
                     isPremiumDisabled: false
                 ),
                 availableSize: CGSize(width: context.availableSize.width - sideInset * 2.0, height: context.availableSize.height),

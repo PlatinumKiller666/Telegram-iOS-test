@@ -46,6 +46,9 @@ public enum ContextMenuActionItemTextColor {
 public enum ContextMenuActionResult {
     case `default`
     case dismissWithoutContent
+    /// Temporary
+    static var safeStreamRecordingDismissWithoutContent: ContextMenuActionResult { .dismissWithoutContent }
+    
     case custom(ContainedViewLayoutTransition)
 }
 
@@ -75,13 +78,20 @@ public enum ContextMenuActionBadgeColor {
     case inactive
 }
 
-public struct ContextMenuActionBadge {
+public struct ContextMenuActionBadge: Equatable {
+    public enum Style {
+        case badge
+        case label
+    }
+    
     public var value: String
     public var color: ContextMenuActionBadgeColor
+    public var style: Style
     
-    public init(value: String, color: ContextMenuActionBadgeColor) {
+    public init(value: String, color: ContextMenuActionBadgeColor, style: Style = .badge) {
         self.value = value
         self.color = color
+        self.style = style
     }
 }
 

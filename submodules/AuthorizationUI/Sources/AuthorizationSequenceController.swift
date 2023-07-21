@@ -221,6 +221,13 @@ public final class AuthorizationSequenceController: NavigationController, MFMail
                                     case .phoneLimitExceeded:
                                         text = strongSelf.presentationData.strings.Login_PhoneFloodError
                                         actions.append(TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {}))
+                                    case .appOutdated:
+                                        text = strongSelf.presentationData.strings.Login_ErrorAppOutdated
+                                        let updateUrl = strongSelf.presentationData.strings.InviteText_URL
+                                        let sharedContext = strongSelf.sharedContext
+                                        actions.append(TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {
+                                            sharedContext.applicationBindings.openUrl(updateUrl)
+                                        }))
                                     case .phoneBanned:
                                         text = strongSelf.presentationData.strings.Login_PhoneBannedError
                                         actions.append(TextAlertAction(type: .genericAction, title: strongSelf.presentationData.strings.Common_OK, action: {}))
@@ -320,7 +327,8 @@ public final class AuthorizationSequenceController: NavigationController, MFMail
                     let bold = MarkdownAttributeSet(font: Font.semibold(self.presentationData.listsFontSize.baseDisplaySize * 13.0 / 17.0), textColor: self.presentationData.theme.actionSheet.primaryTextColor)
                     if let _ = resetPendingDate {
                         self.actionDisposable.set(
-                            resetLoginEmail(account: self.account, phoneNumber: number, phoneCodeHash: phoneCodeHash).start(error: { [weak self] error in
+                            (resetLoginEmail(account: self.account, phoneNumber: number, phoneCodeHash: phoneCodeHash)
+                            |> deliverOnMainQueue).start(error: { [weak self] error in
                                 if let self, case .alreadyInProgress = error {
                                     let formattedNumber = formatPhoneNumber(number)
                                     let title = NSAttributedString(string: self.presentationData.strings.Login_Email_PremiumRequiredTitle, font: Font.semibold(self.presentationData.listsFontSize.baseDisplaySize), textColor: self.presentationData.theme.actionSheet.primaryTextColor)
@@ -580,6 +588,8 @@ public final class AuthorizationSequenceController: NavigationController, MFMail
                         if let strongSelf = self, let controller = controller {
                             controller.inProgress = false
                             
+                            var actions: [TextAlertAction] = [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]
+                            
                             let text: String
                             switch error {
                                 case .limitExceeded:
@@ -588,6 +598,13 @@ public final class AuthorizationSequenceController: NavigationController, MFMail
                                     text = strongSelf.presentationData.strings.Login_InvalidPhoneError
                                 case .phoneLimitExceeded:
                                     text = strongSelf.presentationData.strings.Login_PhoneFloodError
+                                case .appOutdated:
+                                    text = strongSelf.presentationData.strings.Login_ErrorAppOutdated
+                                    let updateUrl = strongSelf.presentationData.strings.InviteText_URL
+                                    let sharedContext = strongSelf.sharedContext
+                                    actions = [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {
+                                        sharedContext.applicationBindings.openUrl(updateUrl)
+                                    })]
                                 case .phoneBanned:
                                     text = strongSelf.presentationData.strings.Login_PhoneBannedError
                                 case .generic:
@@ -596,7 +613,7 @@ public final class AuthorizationSequenceController: NavigationController, MFMail
                                     text = strongSelf.presentationData.strings.Login_NetworkError
                             }
                             
-                            controller.present(standardTextAlertController(theme: AlertControllerTheme(presentationData: strongSelf.presentationData), title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
+                            controller.present(standardTextAlertController(theme: AlertControllerTheme(presentationData: strongSelf.presentationData), title: nil, text: text, actions: actions), in: .window(.root))
                         }
                     }))
                 }

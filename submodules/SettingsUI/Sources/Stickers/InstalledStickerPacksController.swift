@@ -92,6 +92,7 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
     case packOrder(PresentationTheme, String, Bool)
     case packOrderInfo(PresentationTheme, String)
     case suggestAnimatedEmoji(String, Bool)
+    case suggestAnimatedEmojiInfo(PresentationTheme, String)
     case packsTitle(PresentationTheme, String)
     case pack(Int32, PresentationTheme, PresentationStrings, StickerPackCollectionInfo, StickerPackItem?, String, Bool, Bool, ItemListStickerPackItemEditing, Bool?)
     case packsInfo(PresentationTheme, String)
@@ -100,7 +101,7 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
         switch self {
             case .trending, .masks, .emoji, .quickReaction, .archived:
                 return InstalledStickerPacksSection.categories.rawValue
-            case .suggestOptions, .largeEmoji, .suggestAnimatedEmoji, .packOrder, .packOrderInfo:
+            case .suggestOptions, .largeEmoji, .suggestAnimatedEmoji, .suggestAnimatedEmojiInfo, .packOrder, .packOrderInfo:
                 return InstalledStickerPacksSection.settings.rawValue
             case .packsTitle, .pack, .packsInfo:
                 return InstalledStickerPacksSection.stickers.rawValue
@@ -125,16 +126,18 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
                 return .index(6)
             case .suggestAnimatedEmoji:
                 return .index(7)
-            case .packOrder:
+            case .suggestAnimatedEmojiInfo:
                 return .index(8)
-            case .packOrderInfo:
+            case .packOrder:
                 return .index(9)
-            case .packsTitle:
+            case .packOrderInfo:
                 return .index(10)
+            case .packsTitle:
+                return .index(11)
             case let .pack(_, _, _, info, _, _, _, _, _, _):
                 return .pack(info.id)
             case .packsInfo:
-                return .index(11)
+                return .index(12)
         }
     }
     
@@ -196,6 +199,12 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
                 }
             case let .suggestAnimatedEmoji(lhsText, lhsValue):
                 if case let .suggestAnimatedEmoji(rhsText, rhsValue) = rhs, lhsValue == rhsValue, lhsText == rhsText {
+                    return true
+                } else {
+                    return false
+                }
+            case let .suggestAnimatedEmojiInfo(lhsTheme, lhsText):
+                if case let .suggestAnimatedEmojiInfo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
                     return true
                 } else {
                     return false
@@ -323,9 +332,16 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
             default:
                 return true
             }
+        case .suggestAnimatedEmojiInfo:
+            switch rhs {
+            case .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder, .packOrderInfo, .suggestAnimatedEmoji, .suggestAnimatedEmojiInfo:
+                return false
+            default:
+                return true
+            }
         case .packsTitle:
             switch rhs {
-            case .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder, .packOrderInfo, .suggestAnimatedEmoji, .packsTitle:
+            case .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder, .packOrderInfo, .suggestAnimatedEmoji, .suggestAnimatedEmojiInfo, .packsTitle:
                 return false
             default:
                 return true
@@ -390,6 +406,8 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
                 return ItemListSwitchItem(presentationData: presentationData, title: text, value: value, sectionId: self.section, style: .blocks, updated: { value in
                     arguments.toggleSuggestAnimatedEmoji(value)
                 })
+            case let .suggestAnimatedEmojiInfo(_, text):
+                return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
             case let .packsTitle(_, text):
                 return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
             case let .pack(_, _, _, info, topItem, count, animatedStickers, enabled, editing, selected):
@@ -501,7 +519,9 @@ private func installedStickerPacksControllerEntries(context: AccountContext, pre
         if let archived = archived, !archived.isEmpty  {
             entries.append(.archived(presentationData.theme, presentationData.strings.StickerPacksSettings_ArchivedPacks, Int32(archived.count), archived))
         }
-        entries.append(.emoji(presentationData.theme, presentationData.strings.StickerPacksSettings_Emoji, emojiCount))
+        if emojiCount != 0 {
+            entries.append(.emoji(presentationData.theme, presentationData.strings.StickerPacksSettings_Emoji, emojiCount))
+        }
         if let quickReaction = quickReaction, let availableReactions = availableReactions {
             entries.append(.quickReaction(presentationData.strings.Settings_QuickReactionSetup_NavigationTitle, quickReaction, availableReactions))
         }
@@ -531,6 +551,7 @@ private func installedStickerPacksControllerEntries(context: AccountContext, pre
         }
         
         entries.append(.suggestAnimatedEmoji(presentationData.strings.StickerPacksSettings_SuggestAnimatedEmoji, stickerSettings.suggestAnimatedEmoji))
+        entries.append(.suggestAnimatedEmojiInfo(presentationData.theme, presentationData.strings.StickerPacksSettings_SuggestAnimatedEmojiInfo))
     }
     
     if let stickerPacksView = view.views[.itemCollectionInfos(namespaces: [namespaceForMode(mode)])] as? ItemCollectionInfosView {
@@ -595,12 +616,17 @@ private func installedStickerPacksControllerEntries(context: AccountContext, pre
     return entries
 }
 
-public func installedStickerPacksController(context: AccountContext, mode: InstalledStickerPacksControllerMode, archivedPacks: [ArchivedStickerPackItem]? = nil, updatedPacks: @escaping ([ArchivedStickerPackItem]?) -> Void = { _ in }, focusOnItemTag: InstalledStickerPacksEntryTag? = nil) -> ViewController {
+public func installedStickerPacksController(context: AccountContext, mode: InstalledStickerPacksControllerMode, archivedPacks: [ArchivedStickerPackItem]? = nil, updatedPacks: @escaping ([ArchivedStickerPackItem]?) -> Void = { _ in }, focusOnItemTag: InstalledStickerPacksEntryTag? = nil, forceTheme: PresentationTheme? = nil) -> ViewController {
     let initialState = InstalledStickerPacksControllerState().withUpdatedEditing(mode == .modal).withUpdatedSelectedPackIds(mode == .modal ? Set() : nil)
     let statePromise = ValuePromise(initialState, ignoreRepeated: true)
     let stateValue = Atomic(value: initialState)
     let updateState: ((InstalledStickerPacksControllerState) -> InstalledStickerPacksControllerState) -> Void = { f in
         statePromise.set(stateValue.modify { f($0) })
+    }
+    
+    var presentationData = context.sharedContext.currentPresentationData.with { $0 }
+    if let forceTheme {
+        presentationData = presentationData.withUpdated(theme: forceTheme)
     }
     
     var presentControllerImpl: ((ViewController, ViewControllerPresentationArguments?) -> Void)?
@@ -629,7 +655,6 @@ public func installedStickerPacksController(context: AccountContext, mode: Insta
             }
         }
     }, removePack: { archivedItem in
-        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         let controller = ActionSheetController(presentationData: presentationData)
         let dismissAction: () -> Void = { [weak controller] in
             controller?.dismissAnimated()
@@ -713,15 +738,15 @@ public func installedStickerPacksController(context: AccountContext, mode: Insta
             }
         }))
     }, openMasks: {
-        pushControllerImpl?(installedStickerPacksController(context: context, mode: .masks, archivedPacks: archivedPacks, updatedPacks: { _ in}))
+        pushControllerImpl?(installedStickerPacksController(context: context, mode: .masks, archivedPacks: archivedPacks, updatedPacks: { _ in }, forceTheme: forceTheme))
     }, openEmoji: {
-        pushControllerImpl?(installedStickerPacksController(context: context, mode: .emoji, archivedPacks: archivedPacks, updatedPacks: { _ in}))
+        pushControllerImpl?(installedStickerPacksController(context: context, mode: .emoji, archivedPacks: archivedPacks, updatedPacks: { _ in }, forceTheme: forceTheme))
     }, openQuickReaction: {
         pushControllerImpl?(quickReactionSetupController(
             context: context
         ))
     }, openFeatured: {
-        pushControllerImpl?(FeaturedStickersScreen(context: context, highlightedPackId: nil))
+        pushControllerImpl?(FeaturedStickersScreen(context: context, highlightedPackId: nil, forceTheme: forceTheme))
     }, openArchived: { archived in
         let archivedMode: ArchivedStickerPacksControllerMode
         switch mode {
@@ -732,12 +757,11 @@ public func installedStickerPacksController(context: AccountContext, mode: Insta
             default:
                 archivedMode = .stickers
         }
-        pushControllerImpl?(archivedStickerPacksController(context: context, mode: archivedMode, archived: archived, updatedPacks: { packs in
+        pushControllerImpl?(archivedStickerPacksController(context: context, mode: archivedMode, archived: archived, forceTheme: forceTheme, updatedPacks: { packs in
             archivedPromise.set(.single(packs))
             updatedPacks(packs)
         }))
     }, openSuggestOptions: {
-        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         let controller = ActionSheetController(presentationData: presentationData)
         let dismissAction: () -> Void = { [weak controller] in
             controller?.dismissAnimated()
@@ -868,6 +892,11 @@ public func installedStickerPacksController(context: AccountContext, mode: Insta
     )
     |> deliverOnMainQueue
     |> map { presentationData, state, view, temporaryPackOrder, featuredAndArchived, sharedData, quickReaction, availableReactions, emojiCount -> (ItemListControllerState, (ItemListNodeState, Any)) in
+        var presentationData = presentationData
+        if let forceTheme {
+            presentationData = presentationData.withUpdated(theme: forceTheme)
+        }
+        
         var stickerSettings = StickerSettings.defaultSettings
         if let value = sharedData.entries[ApplicationSpecificSharedDataKeys.stickerSettings]?.get(StickerSettings.self) {
            stickerSettings = value

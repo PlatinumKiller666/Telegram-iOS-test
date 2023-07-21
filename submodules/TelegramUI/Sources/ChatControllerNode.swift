@@ -24,6 +24,7 @@ import ChatTitleView
 import ChatInputNode
 import ChatEntityKeyboardInputNode
 import ChatControllerInteraction
+import ChatAvatarNavigationNode
 
 final class VideoNavigationControllerDropContentItem: NavigationControllerDropContentItem {
     let itemNode: OverlayMediaItemNode
@@ -151,6 +152,7 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
     private var inputMediaNodeDataPromise = Promise<ChatEntityKeyboardInputNode.InputData>()
     private var didInitializeInputMediaNodeDataPromise: Bool = false
     private var inputMediaNodeDataDisposable: Disposable?
+    private var inputMediaNodeStateContext = ChatEntityKeyboardInputNode.StateContext()
     
     let navigateButtons: ChatHistoryNavigationButtons
     
@@ -227,7 +229,7 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
     private var isLoadingValue: Bool = false
     private var isLoadingEarlier: Bool = false
     private func updateIsLoading(isLoading: Bool, earlier: Bool, animated: Bool) {
-        let useLoadingPlaceholder = self.chatLocation.peerId?.namespace != Namespaces.Peer.CloudUser
+        let useLoadingPlaceholder = "".isEmpty
         
         let updated = isLoading != self.isLoadingValue || (isLoading && earlier && !self.isLoadingEarlier)
         
@@ -535,12 +537,15 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
                 
                 var emptyType: ChatHistoryNodeLoadState.EmptyType?
                 if case let .empty(type) = loadState {
-                    emptyType = type
-                    if case .joined = type {
-                        if strongSelf.didDisplayEmptyGreeting {
-                            emptyType = .generic
-                        } else {
-                            strongSelf.didDisplayEmptyGreeting = true
+                    if case .botInfo = type {
+                    } else {
+                        emptyType = type
+                        if case .joined = type {
+                            if strongSelf.didDisplayEmptyGreeting {
+                                emptyType = .generic
+                            } else {
+                                strongSelf.didDisplayEmptyGreeting = true
+                            }
                         }
                     }
                 } else if case .messages = loadState {
@@ -1966,13 +1971,13 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
                 }
             }
             if inputPanelNodeHandlesTransition {
-                inputPanelNode.updateAbsoluteRect(apparentInputPanelFrame, within: layout.size, transition: .immediate)
                 inputPanelNode.frame = apparentInputPanelFrame
                 inputPanelNode.alpha = 1.0
+                inputPanelNode.updateAbsoluteRect(apparentInputPanelFrame, within: layout.size, transition: .immediate)
             } else {
-                inputPanelNode.updateAbsoluteRect(apparentInputPanelFrame, within: layout.size, transition: transition)
                 transition.updateFrame(node: inputPanelNode, frame: apparentInputPanelFrame)
                 transition.updateAlpha(node: inputPanelNode, alpha: 1.0)
+                inputPanelNode.updateAbsoluteRect(apparentInputPanelFrame, within: layout.size, transition: transition)
             }
             
             if let viewForOverlayContent = inputPanelNode.viewForOverlayContent {
@@ -2278,13 +2283,7 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
             return false
         }
     }
-    
-    private final class EmptyInputView: UIView, UIInputViewAudioFeedback {
-        var enableInputClicksWhenVisible: Bool {
-            return true
-        }
-    }
-    
+        
     private let emptyInputView = EmptyInputView()
     private func chatPresentationInterfaceStateInputView(_ state: ChatPresentationInterfaceState) -> UIView? {
         switch state.inputMode {
@@ -2630,14 +2629,18 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
             peerId = id
         }
         
+        guard let interfaceInteraction = self.interfaceInteraction else {
+            return nil
+        }
+        
         let inputNode = ChatEntityKeyboardInputNode(
             context: self.context,
             currentInputData: inputMediaNodeData,
             updatedInputData: self.inputMediaNodeDataPromise.get(),
             defaultToEmojiTab: !self.chatPresentationInterfaceState.interfaceState.effectiveInputState.inputText.string.isEmpty || self.chatPresentationInterfaceState.interfaceState.forwardMessageIds != nil || self.openStickersBeginWithEmoji,
-            controllerInteraction: self.controllerInteraction,
-            interfaceInteraction: self.interfaceInteraction,
-            chatPeerId: peerId
+            interaction: ChatEntityKeyboardInputNode.Interaction(chatControllerInteraction: self.controllerInteraction, panelInteraction: interfaceInteraction),
+            chatPeerId: peerId,
+            stateContext: self.inputMediaNodeStateContext
         )
         self.openStickersBeginWithEmoji = false
         
@@ -2645,12 +2648,23 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
     }
     
     func loadInputPanels(theme: PresentationTheme, strings: PresentationStrings, fontSize: PresentationFontSize) {
-        if !self.didInitializeInputMediaNodeDataPromise, let interfaceInteraction = self.interfaceInteraction {
+        if !self.didInitializeInputMediaNodeDataPromise {
             self.didInitializeInputMediaNodeDataPromise = true
-            
-            let areCustomEmojiEnabled = self.chatPresentationInterfaceState.customEmojiAvailable
-            
-            self.inputMediaNodeDataPromise.set(ChatEntityKeyboardInputNode.inputData(context: self.context, interfaceInteraction: interfaceInteraction, controllerInteraction: self.controllerInteraction, chatPeerId: self.chatLocation.peerId, areCustomEmojiEnabled: areCustomEmojiEnabled))
+                        
+            self.inputMediaNodeDataPromise.set(
+                ChatEntityKeyboardInputNode.inputData(
+                    context: self.context,
+                    chatPeerId: self.chatLocation.peerId,
+                    areCustomEmojiEnabled: self.chatPresentationInterfaceState.customEmojiAvailable,
+                    sendGif: { [weak self] fileReference, sourceView, sourceRect, silentPosting, schedule in
+                        if let self {
+                            return self.controllerInteraction.sendGif(fileReference, sourceView, sourceRect, silentPosting, schedule)
+                        } else {
+                            return false
+                        }
+                    }
+                )
+            )
         }
         
         self.textInputPanelNode?.loadTextInputNodeIfNeeded()
@@ -3145,7 +3159,7 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
                 
                 if let firstLockedPremiumEmoji = firstLockedPremiumEmoji {
                     let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
-                    self.controllerInteraction.displayUndo(.sticker(context: context, file: firstLockedPremiumEmoji, title: nil, text: presentationData.strings.EmojiInput_PremiumEmojiToast_Text, undoText: presentationData.strings.EmojiInput_PremiumEmojiToast_Action, customAction: { [weak self] in
+                    self.controllerInteraction.displayUndo(.sticker(context: context, file: firstLockedPremiumEmoji, loop: true, title: nil, text: presentationData.strings.EmojiInput_PremiumEmojiToast_Text, undoText: presentationData.strings.EmojiInput_PremiumEmojiToast_Action, customAction: { [weak self] in
                         guard let strongSelf = self else {
                             return
                         }
@@ -3176,7 +3190,7 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
                 let trimmedInputText = effectiveInputText.string.trimmingCharacters(in: .whitespacesAndNewlines)
                 let peerId = effectivePresentationInterfaceState.chatLocation.peerId
                 if peerId?.namespace != Namespaces.Peer.SecretChat, let interactiveEmojis = self.interactiveEmojis, interactiveEmojis.emojis.contains(trimmedInputText), effectiveInputText.attribute(ChatTextInputAttributes.customEmoji, at: 0, effectiveRange: nil) == nil {
-                    messages.append(.message(text: "", attributes: [], inlineStickers: [:], mediaReference: AnyMediaReference.standalone(media: TelegramMediaDice(emoji: trimmedInputText)), replyToMessageId: self.chatPresentationInterfaceState.interfaceState.replyMessageId, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: []))
+                    messages.append(.message(text: "", attributes: [], inlineStickers: [:], mediaReference: AnyMediaReference.standalone(media: TelegramMediaDice(emoji: trimmedInputText)), replyToMessageId: self.chatPresentationInterfaceState.interfaceState.replyMessageId, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: []))
                 } else {
                     let inputText = convertMarkdownToAttributes(effectiveInputText)
                     
@@ -3209,7 +3223,7 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
                                 bubbleUpEmojiOrStickersets.removeAll()
                             }
 
-                            messages.append(.message(text: text.string, attributes: attributes, inlineStickers: inlineStickers, mediaReference: webpage.flatMap(AnyMediaReference.standalone), replyToMessageId: self.chatPresentationInterfaceState.interfaceState.replyMessageId, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets))
+                            messages.append(.message(text: text.string, attributes: attributes, inlineStickers: inlineStickers, mediaReference: webpage.flatMap(AnyMediaReference.standalone), replyToMessageId: self.chatPresentationInterfaceState.interfaceState.replyMessageId, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets))
                         }
                     }
 
@@ -3440,6 +3454,7 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
     }
 
     final class SnapshotState {
+        let backgroundNode: WallpaperBackgroundNode
         fileprivate let historySnapshotState: ChatHistoryListNode.SnapshotState
         let titleViewSnapshotState: ChatTitleView.SnapshotState?
         let avatarSnapshotState: ChatAvatarNavigationNode.SnapshotState?
@@ -3450,6 +3465,7 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
         let inputPanelOverscrollNodeSnapshot: UIView?
 
         fileprivate init(
+            backgroundNode: WallpaperBackgroundNode,
             historySnapshotState: ChatHistoryListNode.SnapshotState,
             titleViewSnapshotState: ChatTitleView.SnapshotState?,
             avatarSnapshotState: ChatAvatarNavigationNode.SnapshotState?,
@@ -3459,6 +3475,7 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
             inputPanelNodeSnapshot: UIView?,
             inputPanelOverscrollNodeSnapshot: UIView?
         ) {
+            self.backgroundNode = backgroundNode
             self.historySnapshotState = historySnapshotState
             self.titleViewSnapshotState = titleViewSnapshotState
             self.avatarSnapshotState = avatarSnapshotState
@@ -3490,6 +3507,7 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
             inputPanelOverscrollNodeSnapshot = snapshot
         }
         return SnapshotState(
+            backgroundNode: self.backgroundNode,
             historySnapshotState: self.historyNode.prepareSnapshotState(),
             titleViewSnapshotState: titleViewSnapshotState,
             avatarSnapshotState: avatarSnapshotState,
@@ -3502,7 +3520,14 @@ class ChatControllerNode: ASDisplayNode, UIScrollViewDelegate {
     }
 
     func animateFromSnapshot(_ snapshotState: SnapshotState, completion: @escaping () -> Void) {
-        self.historyNode.animateFromSnapshot(snapshotState.historySnapshotState, completion: completion)
+        let previousBackgroundNode = snapshotState.backgroundNode
+        self.backgroundNode.supernode?.insertSubnode(previousBackgroundNode, belowSubnode: self.backgroundNode)
+        
+        self.historyNode.animateFromSnapshot(snapshotState.historySnapshotState, completion: { [weak previousBackgroundNode] in
+            previousBackgroundNode?.removeFromSupernode()
+            
+            completion()
+        })
         self.navigateButtons.animateFromSnapshot(snapshotState.navigationButtonsSnapshotState)
 
         if let titleAccessoryPanelSnapshot = snapshotState.titleAccessoryPanelSnapshot {
